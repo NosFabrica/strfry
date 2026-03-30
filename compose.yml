@@ -1,0 +1,59 @@
+services:
+  redis_strfry:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  strfry:
+    image: neofry
+    container_name: neofry
+    ports:
+      - 7777:7777
+
+    environment:
+      ROUTER: /etc/strfry-router.conf
+
+    volumes:
+      - ./strfry-db:/app/strfry-db
+      - ./strfry.conf:/etc/strfry.conf
+    restart: always
+    stop_grace_period: 2m
+    depends_on:
+      - redis_strfry
+      - neo4j_strfry
+    ulimits:
+      nofile:
+        soft: 1000000
+        hard: 1000000
+
+  neo4j_strfry:
+    image: neo4j:5
+    container_name: neo4j_strfry
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+      - "7688:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/password
+
+      - NEO4J_server_memory_heap_initial__size=4G
+      - NEO4J_server_memory_heap_max__size=4G
+      - NEO4J_server_memory_pagecache_size=8G
+
+      - NEO4J_server_bolt_telemetry_enabled=false
+
+    volumes:
+      - neo4j_strfry_data:/data
+      - neo4j_strfry_logs:/logs
+      - neo4j_strfry_import:/import
+
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+
+
+volumes:
+  neo4j_strfry_data:
+  neo4j_strfry_logs:
+  neo4j_strfry_import:
