@@ -12,6 +12,7 @@
 
 #include "AnsiLogo.h"
 #include "app_git_version.h"
+#include "redis.h"
 
 
 
@@ -104,4 +105,10 @@ void onAppStartup(lmdb::txn &txn, const std::string &cmd) {
     setRLimits();
 
     negentropyDbi = negentropy::storage::BTreeLMDB::setupDB(txn, "negentropy");
+
+    if (redis_init(cfg().redis__host.c_str(), cfg().redis__port) != 0) {
+        throw herr("failed to connect to redis at ", cfg().redis__host, ":", cfg().redis__port);
+    }
+    redis_hset("strfry:startup", "status", "startup_test");
+    LI << "Connected to Redis at " << cfg().redis__host << ":" << cfg().redis__port;
 }
