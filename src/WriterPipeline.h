@@ -5,7 +5,12 @@
 #include "golpe.h"
 
 #include "events.h"
+#include "redis.h"
+#include <unordered_set>
 
+static const std::unordered_set<uint16_t> REDIS_ALLOW_KINDS = {
+    3, 10000, 1984
+};
 
 struct WriterPipelineInput {
     tao::json::value eventJson;
@@ -157,6 +162,13 @@ struct WriterPipeline {
                         if (ev.status == EventWriteStatus::Written) {
                             written++;
                             totalWritten++;
+
+                            PackedEventView packed(ev.packedStr);
+                            auto kind = packed.kind();
+
+                            if (REDIS_ALLOW_KINDS.contains(kind)) {
+                                redis_rpush("strfry:events", ev.jsonStr.c_str());
+                            }
                         } else if (ev.status == EventWriteStatus::Duplicate) {
                             dups++;
                             totalDups++;

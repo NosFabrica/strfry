@@ -129,9 +129,19 @@ config:
     default: false
     noReload: true
 
+  - name: redis__host
+    desc: "Redis hostname or IP"
+    default: "redis_strfry"
+    noReload: true
+
+  - name: redis__port
+    desc: "Redis TCP port"
+    default: 6379
+    noReload: true
+
   - name: events__maxEventSize
     desc: "Maximum size of normalised JSON, in bytes"
-    default: 65536
+    default: 300000000000000
   - name: events__rejectEventsNewerThanSeconds
     desc: "Events newer than this will be rejected"
     default: 900 # 15 mins

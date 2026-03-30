@@ -1,7 +1,13 @@
 #include "RelayServer.h"
 
 #include "PluginEventSifter.h"
+#include "redis.h"
+#include <unordered_set>
 
+
+static const std::unordered_set<uint16_t> REDIS_ALLOW_KINDS = {
+    3, 10000, 1984
+};
 
 void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
     PluginEventSifter writePolicyPlugin;
@@ -92,6 +98,10 @@ void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
             if (newEvent.status == EventWriteStatus::Written) {
                 LI << "Inserted event. id=" << eventIdHex << " levId=" << newEvent.levId;
                 written = true;
+                auto kind = packed.kind();
+                if (REDIS_ALLOW_KINDS.contains(kind)) {
+                    redis_rpush("strfry:events", newEvent.jsonStr.c_str());
+                }
             } else if (newEvent.status == EventWriteStatus::Duplicate) {
                 message = "duplicate: have this event";
                 written = true;
