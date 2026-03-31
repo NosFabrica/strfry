@@ -2,9 +2,9 @@
 .github
 .gitignore
 .gitlab-ci.yml
-.gitmodules
 Dockerfile
 Dockerfile.archive
+Dockerfile.neofry
 ubuntu.Dockerfile
 compose.yml
 compose.yaml
