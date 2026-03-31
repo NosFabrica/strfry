@@ -110,5 +110,13 @@ void onAppStartup(lmdb::txn &txn, const std::string &cmd) {
         throw herr("failed to connect to redis at ", cfg().redis__host, ":", cfg().redis__port);
     }
     redis_hset("strfry:startup", "status", "startup_test");
+
+    {
+        time_t now = ::time(nullptr);
+        char buf[32];
+        strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+        redis_hset("strfry:startup", "time", buf);
+    }
+
     LI << "Connected to Redis at " << cfg().redis__host << ":" << cfg().redis__port;
 }
