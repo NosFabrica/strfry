@@ -1,6 +1,8 @@
 name: neofry-sync
 
 on:
+  schedule:
+    - cron: "0 13 * * 1" # weekly Monday 8am ET (13:00 UTC)
   workflow_dispatch:
 
 jobs:
