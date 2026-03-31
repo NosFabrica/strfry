@@ -1,0 +1,95 @@
+name: neofry-sync
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync-upstream:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Sync master with upstream strfry
+        run: |
+          git remote add upstream https://github.com/hoytech/strfry.git || true
+          git fetch upstream
+          git merge upstream/master --ff-only || echo "Master diverged from upstream, skipping sync"
+          git push origin master || echo "Nothing to push"
+
+  check-upstream:
+    needs: sync-upstream
+    runs-on: ubuntu-latest
+    outputs:
+      new_release: ${{ steps.check.outputs.new_release }}
+      latest_tag: ${{ steps.check.outputs.latest_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: neofry
+          fetch-depth: 0
+
+      - name: Check if neofry is behind latest strfry release
+        id: check
+        run: |
+          LATEST=$(git -c 'versionsort.suffix=-' ls-remote --tags --sort=-v:refname https://github.com/hoytech/strfry.git | \
+            grep -oP 'refs/tags/\K[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          echo "latest_tag=$LATEST" >> "$GITHUB_OUTPUT"
+
+          # Check if the latest tag is an ancestor of neofry branch
+          if git merge-base --is-ancestor "$LATEST" HEAD 2>/dev/null; then
+            echo "new_release=false" >> "$GITHUB_OUTPUT"
+            echo "neofry already includes strfry $LATEST"
+          else
+            echo "new_release=true" >> "$GITHUB_OUTPUT"
+            echo "strfry $LATEST is not yet in neofry branch"
+          fi
+
+  open-issue:
+    needs: check-upstream
+    if: needs.check-upstream.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Create rebase reminder issue
+        env:
+          LATEST_TAG: ${{ needs.check-upstream.outputs.latest_tag }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = process.env.LATEST_TAG;
+            const title = `strfry ${tag} released — rebase neofry branch`;
+            const body = [
+              `strfry [${tag}](https://github.com/hoytech/strfry/releases/tag/${tag}) has been released.`,
+              '',
+              'To update neofry:',
+              '```bash',
+              'cd strfry',
+              'git fetch origin && git fetch upstream',
+              'git checkout neofry',
+              `git rebase ${tag}`,
+              'git push origin neofry --force-with-lease',
+              '```',
+            ].join('\n');
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'neofry-rebase',
+            });
+
+            if (existing.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['neofry-rebase'],
+              });
+            }
