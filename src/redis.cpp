@@ -25,6 +25,7 @@ void redis_publish(const char *channel, const char *message) {
     if (reply) freeReplyObject(reply);
 }
 
+// --- New hash helper ---
 void redis_hset(const char *key, const char *field, const char *value) {
     if (!redis) return;
     redisReply *reply = (redisReply *)redisCommand(redis, "HSET %s %s %s", key, field, value);
