@@ -23,6 +23,7 @@ RUN \
     hiredis-dev \
     && rm -rf /var/cache/apk/* \
     && git submodule update --init \
+    && bash scripts/apply-redis-patches.sh . \
     && make setup-golpe \
     && make -j$(nproc)
 

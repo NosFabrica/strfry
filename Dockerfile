@@ -29,6 +29,8 @@ COPY . .
 
 RUN git submodule update --init
 
+RUN bash scripts/apply-redis-patches.sh .
+
 RUN make setup-golpe
 
 RUN --mount=type=cache,target=/build/.cache \
