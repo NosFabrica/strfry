@@ -2,6 +2,13 @@
 
 #include "PluginEventSifter.h"
 #include "PrometheusMetrics.h"
+#include "redis.h"
+#include <unordered_set>
+
+
+static const std::unordered_set<uint16_t> REDIS_ALLOW_KINDS = {
+    3, 10000, 1984
+};
 
 
 void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
@@ -101,6 +108,10 @@ void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
                 written = true;
                 PrometheusMetrics::getInstance().writtenEventsTotal.inc();
                 PROM_INC_EVENT_KIND(std::to_string(packed.kind()));
+                auto kind = packed.kind();
+                if (REDIS_ALLOW_KINDS.contains(kind)) {
+                    redis_rpush("strfry:events", newEvent.jsonStr.c_str());
+                }
             } else if (newEvent.status == EventWriteStatus::Duplicate) {
                 message = "duplicate: have this event";
                 written = true;

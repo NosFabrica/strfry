@@ -1,19 +1,19 @@
 appName: strfry
 features:
-    ssl: true
-    config: true
-    onAppStartup: true
-    onPreStartup: true
-    db: true
-    customLMDBSetup: true
-    websockets: true
-    templar: true
+  ssl: true
+  config: true
+  onAppStartup: true
+  onPreStartup: true
+  db: true
+  customLMDBSetup: true
+  websockets: true
+  templar: true
 
 includes: |
-    #include "golpe.h"
-    #include "global.h"
-    #include "PackedEvent.h"
-    #include "EventUtils.h"
+  #include "golpe.h"
+  #include "global.h"
+  #include "PackedEvent.h"
+  #include "EventUtils.h"
 
 tables:
   ## DB meta-data. Single entry, with id = 1
@@ -53,43 +53,43 @@ tables:
         multi: true
 
     indexPrelude: |
-        PackedEventView packed(v.buf);
-        created_at = packed.created_at();
-        uint64_t indexTime = *created_at;
+      PackedEventView packed(v.buf);
+      created_at = packed.created_at();
+      uint64_t indexTime = *created_at;
 
-        id = makeKey_StringUint64(packed.id(), indexTime);
-        pubkey = makeKey_StringUint64(packed.pubkey(), indexTime);
-        kind = makeKey_Uint64Uint64(packed.kind(), indexTime);
-        pubkeyKind = makeKey_StringUint64Uint64(packed.pubkey(), packed.kind(), indexTime);
+      id = makeKey_StringUint64(packed.id(), indexTime);
+      pubkey = makeKey_StringUint64(packed.pubkey(), indexTime);
+      kind = makeKey_Uint64Uint64(packed.kind(), indexTime);
+      pubkeyKind = makeKey_StringUint64Uint64(packed.pubkey(), packed.kind(), indexTime);
 
-        packed.foreachTag([&](char tagName, std::string_view tagVal){
-            tag.push_back(makeKey_StringUint64(std::string(1, tagName) + std::string(tagVal), indexTime));
+      packed.foreachTag([&](char tagName, std::string_view tagVal){
+          tag.push_back(makeKey_StringUint64(std::string(1, tagName) + std::string(tagVal), indexTime));
 
-            if (tagName == 'd' && replace.size() == 0) {
-                replace.push_back(makeKey_StringUint64(std::string(packed.pubkey()) + std::string(tagVal), packed.kind()));
-            } else if (tagName == 'e') {
-                if (packed.kind() == 5) {
-                    deletion.push_back(std::string(tagVal) + std::string(packed.pubkey()));
-                }
-            } else if (tagName == 'a') {
-                if (packed.kind() == 5) {
-                    try { // parseATag can fail
-                        auto [kind, pubkey, dTag] = parseATag(tagVal);
+          if (tagName == 'd' && replace.size() == 0) {
+              replace.push_back(makeKey_StringUint64(std::string(packed.pubkey()) + std::string(tagVal), packed.kind()));
+          } else if (tagName == 'e') {
+              if (packed.kind() == 5) {
+                  deletion.push_back(std::string(tagVal) + std::string(packed.pubkey()));
+              }
+          } else if (tagName == 'a') {
+              if (packed.kind() == 5) {
+                  try { // parseATag can fail
+                      auto [kind, pubkey, dTag] = parseATag(tagVal);
 
-                        if (isParamReplaceableKind(kind) && pubkey == packed.pubkey()) {
-                            replaceDeletion.push_back(makeKey_StringUint64(sha256(tagVal).sv(), packed.created_at()));
-                        }
-                    } catch(...) {
-                    }
-                }
-            }
+                      if (isParamReplaceableKind(kind) && pubkey == packed.pubkey()) {
+                          replaceDeletion.push_back(makeKey_StringUint64(sha256(tagVal).sv(), packed.created_at()));
+                      }
+                  } catch(...) {
+                  }
+              }
+          }
 
-            return true;
-        });
+          return true;
+      });
 
-        if (packed.expiration() != 0) {
-            expiration.push_back(packed.expiration());
-        }
+      if (packed.expiration() != 0) {
+          expiration.push_back(packed.expiration());
+      }
 
   CompressionDictionary:
     fields:
@@ -108,7 +108,7 @@ tablesRaw:
   ##   0: no compression, payload follows
   ##   1: zstd compression. Followed by Dictionary ID (native endian uint32) then compressed payload
   EventPayload:
-    flags: 'MDB_INTEGERKEY'
+    flags: "MDB_INTEGERKEY"
 
 config:
   - name: db
@@ -129,9 +129,19 @@ config:
     default: false
     noReload: true
 
+  - name: redis__host
+    desc: "Redis hostname or IP"
+    default: "redis_strfry"
+    noReload: true
+
+  - name: redis__port
+    desc: "Redis TCP port"
+    default: 6379
+    noReload: true
+
   - name: events__maxEventSize
     desc: "Maximum size of normalised JSON, in bytes"
-    default: 65536
+    default: 300000000000000
   - name: events__rejectEventsNewerThanSeconds
     desc: "Events newer than this will be rejected"
     default: 900 # 15 mins

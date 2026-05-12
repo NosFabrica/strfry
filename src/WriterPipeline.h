@@ -5,7 +5,12 @@
 #include "golpe.h"
 
 #include "events.h"
+#include "redis.h"
+#include <unordered_set>
 
+static const std::unordered_set<uint16_t> REDIS_ALLOW_KINDS = {
+    3, 10000, 1984
+};
 
 struct WriterPipelineInput {
     tao::json::value eventJson;
@@ -110,7 +115,7 @@ struct WriterPipeline {
                 bool isVerbose = verboseCommit();
                 auto newEvents = writerInbox.pop_all();
 
-                uint64_t written = 0, dups = 0, replaced = 0, deleted = 0;
+                uint64_t written = 0, dups = 0, replaced = 0, deleted = 0, neoforjsent = 0;
 
                 // Collect a certain amount of records in a batch, push the rest back into the writerInbox
                 // Pre-filter out dups in a read-only txn as an optimisation
@@ -160,6 +165,14 @@ struct WriterPipeline {
                         if (ev.status == EventWriteStatus::Written) {
                             written++;
                             totalWritten++;
+
+                            PackedEventView packed(ev.packedStr);
+                            auto kind = packed.kind();
+
+                            if (REDIS_ALLOW_KINDS.contains(kind)) {
+                                redis_rpush("strfry:events", ev.jsonStr.c_str());
+                                neoforjsent++;
+                            }
                         } else if (ev.status == EventWriteStatus::Duplicate) {
                             dups++;
                             totalDups++;
@@ -175,7 +188,7 @@ struct WriterPipeline {
                     if (onCommit) onCommit(written);
                 }
 
-                if (isVerbose) LI << "Writer: added: " << written << " dups: " << dups << " replaced: " << replaced << " deleted: " << deleted;
+                if (isVerbose) LI << "Writer: added: " << written << " dups: " << dups << " replaced: " << replaced << " deleted: " << deleted << " neo4j_inserted: " << neoforjsent;
 
                 if (shutdownComplete) {
                     flushInbox.push_move(true);
