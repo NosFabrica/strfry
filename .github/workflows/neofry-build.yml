@@ -1,62 +1,119 @@
 name: neofry-build
 
+# Mirrors the build workflow used by the in-house brainstorm repos
+# (brainstorm_server, Brainstorm-UI, brainstorm_graperank_algorithm) so
+# that operators can pin a specific commit via the standard `sha-<short>`
+# tag in Helm values.
+#
+# Differences vs. those repos, all intentional:
+#   * Triggers only on the `neofry` branch (this repo's default) and
+#     `neofry-*` tags, not `**` / `v*`. The strfry repo tracks an upstream
+#     fork; we don't want to publish images for every upstream branch we
+#     happen to fetch.
+#   * Builds linux/amd64 only — that's all the cluster runs.
+#   * `submodules: true` on checkout — strfry has git submodules.
+#   * Uses Dockerfile.neofry (the relay+plugin variant) rather than the
+#     plain Dockerfile.
 on:
+  workflow_dispatch:
   push:
     branches:
       - "neofry"
     tags:
       - "neofry-*"
 
-  workflow_dispatch:
+concurrency:
+  group: neofry-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  # Override the default `<org>/<repo>` -> `nosfabrica/strfry` mapping;
+  # the published image has historically been called `neofry` and the
+  # Helm chart's neofry.image.repository default points there.
+  IMAGE_NAME: ${{ github.repository_owner }}/neofry
 
 jobs:
   build:
+    name: Build and push image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: true
 
-      - uses: docker/login-action@v3
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.3.0
         with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          dockerfile: Dockerfile.neofry
+          ignore: DL3008,DL3018,DL3059
+          failure-threshold: warning
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Determine tags
-        id: tags
+      - name: Compute lowercase image name
+        id: img
         run: |
-          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          IMAGE="ghcr.io/${OWNER}/neofry"
+          echo "name=$(echo '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-          # Extract strfry base version from nearest non-neofry tag
+      # Compute the legacy combined version tag (neofry-X.Y.Z-strfry-X.Y.Z)
+      # so we can keep publishing it alongside the new metadata-action tags.
+      # Anyone already pinning to that tag in values continues to work.
+      - name: Compute legacy combined version tag
+        id: legacy
+        run: |
           STRFRY_VER=$(git tag --sort=-v:refname | grep -P '^\d+\.\d+\.\d+$' | head -1)
           STRFRY_VER="${STRFRY_VER:-unknown}"
-
-          # Neofry version from latest neofry-* tag
           NEOFRY_VER=$(git tag --sort=-v:refname | grep -oP '^neofry-\K.*' | head -1)
           NEOFRY_VER="${NEOFRY_VER:-0.0.0}"
+          echo "tag=neofry-${NEOFRY_VER}-strfry-${STRFRY_VER}" >> "$GITHUB_OUTPUT"
 
-          FULL_VER="neofry-${NEOFRY_VER}-strfry-${STRFRY_VER}"
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ steps.img.outputs.name }}
+          # Tag matrix:
+          #   * branch name on every branch push        (mutable)
+          #   * full git ref on tag pushes              (mutable per ref)
+          #   * `sha-<short>` on every push             (immutable per commit)  <- pin this in values
+          #   * semver from `v*` tags (we don't really publish these for
+          #     neofry today, but harmless to declare)  (immutable)
+          #   * combined `neofry-X.Y.Z-strfry-X.Y.Z`    (legacy alias, mutable)
+          #   * `:latest` only on the default branch    (mutable)
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short,prefix=sha-
+            type=raw,value=${{ steps.legacy.outputs.tag }}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'neofry') }}
 
-          TAGS="${IMAGE}:latest"
-          TAGS="${TAGS},${IMAGE}:${FULL_VER}"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
-          echo "Image tags: ${FULL_VER}, latest"
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.neofry
           push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.tags.outputs.tags }}
+          provenance: false
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
