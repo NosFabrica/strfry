@@ -6,19 +6,23 @@ name: neofry-build
 # tag in Helm values.
 #
 # Differences vs. those repos, all intentional:
-#   * Triggers only on the `neofry` branch (this repo's default) and
-#     `neofry-*` tags, not `**` / `v*`. The strfry repo tracks an upstream
-#     fork; we don't want to publish images for every upstream branch we
-#     happen to fetch.
 #   * Builds linux/amd64 only — that's all the cluster runs.
 #   * `submodules: true` on checkout — strfry has git submodules.
 #   * Uses Dockerfile.neofry (the relay+plugin variant) rather than the
 #     plain Dockerfile.
+#   * Tag triggers are `neofry-*` instead of `v*`, since this repo
+#     namespaces its own version tags under that prefix to avoid colliding
+#     with upstream strfry's `vX.Y.Z` tags.
 on:
   workflow_dispatch:
   push:
     branches:
-      - "neofry"
+      # Build for every branch. Branch-derived tags are sanitized by
+      # docker/metadata-action (slashes become dashes), so feature branches
+      # like `fix/kind-0` produce a `fix-kind-0` image tag automatically.
+      # `:latest` is gated separately below to only fire on the `neofry`
+      # default branch — see the metadata-action `enable=` clause.
+      - "**"
     tags:
       - "neofry-*"
 
