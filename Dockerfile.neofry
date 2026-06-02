@@ -24,7 +24,7 @@ RUN \
     && rm -rf /var/cache/apk/* \
     && git submodule update --init \
     && make setup-golpe \
-    && make -j$(nproc)
+    && make -j"$(nproc)"
 
 FROM alpine:3.18.3
 
