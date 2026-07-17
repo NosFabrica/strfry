@@ -2,8 +2,6 @@ name: neofry-build
 
 on:
   push:
-    branches:
-      - "neofry"
     tags:
       - "neofry-*"
 

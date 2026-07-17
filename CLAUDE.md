@@ -48,6 +48,19 @@ Grounded in `git diff origin/master..neofry`. The point of neofry is to **push s
   - `brainstorm_server` consumes `strfry:events` (see its `app/message_queue_tasks/message_queue_consumer.py`).
 - **[`golpe.yaml`](golpe.yaml)** — adds config keys **`redis__host`** (default `redis_strfry`) and **`redis__port`** (default `6379`).
 
+## Releasing the neofry image
+
+[`neofry-build.yml`](.github/workflows/neofry-build.yml) builds `Dockerfile.neofry` and pushes `:latest` + `:neofry-<NEOFRY_VER>-strfry-<STRFRY_VER>` to `ghcr.io/nosfabrica/neofry`. It fires **only on a `neofry-*` tag** (or manual `workflow_dispatch`) — pushing/merging to the `neofry` branch does **not** build. A tag is the one and only release trigger.
+
+Merge the branch into `neofry` **first**, then tag that commit so the tag lives on `neofry`:
+
+```bash
+git tag neofry-1.1.0 origin/neofry    # tag the merged tip
+git push origin neofry-1.1.0          # builds + push
+```
+
+`NEOFRY_VER` is the highest `neofry-*` tag, so bump it every release. Merge mods to `neofry`, never `master`.
+
 ## Gotchas
 
 - **neofry hard-requires Redis at startup** — [`onAppStartup.cpp`](src/onAppStartup.cpp) throws if it can't connect. In compose/k8s, Redis must come up first (`depends_on: redis_strfry`).
