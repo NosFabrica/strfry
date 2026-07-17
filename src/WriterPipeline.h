@@ -6,11 +6,7 @@
 
 #include "events.h"
 #include "redis.h"
-#include <unordered_set>
-
-static const std::unordered_set<uint16_t> REDIS_ALLOW_KINDS = {
-    0, 3, 10000, 1984
-};
+#include "redisAllowKinds.h"
 
 struct WriterPipelineInput {
     tao::json::value eventJson;

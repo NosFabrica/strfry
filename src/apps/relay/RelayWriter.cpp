@@ -3,12 +3,7 @@
 #include "PluginEventSifter.h"
 #include "PrometheusMetrics.h"
 #include "redis.h"
-#include <unordered_set>
-
-
-static const std::unordered_set<uint16_t> REDIS_ALLOW_KINDS = {
-    0, 3, 10000, 1984
-};
+#include "redisAllowKinds.h"
 
 
 void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
