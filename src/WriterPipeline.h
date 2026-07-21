@@ -165,7 +165,7 @@ struct WriterPipeline {
                             PackedEventView packed(ev.packedStr);
                             auto kind = packed.kind();
 
-                            if (REDIS_ALLOW_KINDS.contains(kind)) {
+                            if (redisAllowKinds().contains(kind)) {
                                 redis_rpush("strfry:events", ev.jsonStr.c_str());
                                 neoforjsent++;
                             }

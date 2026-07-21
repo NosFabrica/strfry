@@ -104,7 +104,7 @@ void RelayServer::runWriter(ThreadPool<MsgWriter>::Thread &thr) {
                 PrometheusMetrics::getInstance().writtenEventsTotal.inc();
                 PROM_INC_EVENT_KIND(std::to_string(packed.kind()));
                 auto kind = packed.kind();
-                if (REDIS_ALLOW_KINDS.contains(kind)) {
+                if (redisAllowKinds().contains(kind)) {
                     redis_rpush("strfry:events", newEvent.jsonStr.c_str());
                 }
             } else if (newEvent.status == EventWriteStatus::Duplicate) {

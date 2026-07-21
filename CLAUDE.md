@@ -40,7 +40,7 @@ Grounded in `git diff origin/master..neofry`. The point of neofry is to **push s
 ### Redis event firehose (the core mod)
 
 - **[`src/redis.cpp`](src/redis.cpp) / [`src/redis.h`](src/redis.h)** (new) — thin hiredis wrapper: `redis_init`, `redis_publish`, `redis_hset`, `redis_rpush`, `redis_close`. Single global synchronous connection. `redis.h` is a C-ABI header (`extern "C"`) — keep C++ types out of it.
-- **[`src/redisAllowKinds.h`](src/redisAllowKinds.h)** (new) — the single definition of `REDIS_ALLOW_KINDS`, included by both write paths.
+- **[`src/redisAllowKinds.h`](src/redisAllowKinds.h)** (new) — `redisAllowKinds()`, the set of forwarded kinds, parsed once from `cfg().redis__kinds` (config-driven, not hardcoded). Included by both write paths.
 - **[`src/onAppStartup.cpp`](src/onAppStartup.cpp)** — on boot, `redis_init(cfg().redis__host, cfg().redis__port)`. **Hard fail (throws) if Redis is unreachable** — neofry will not start without Redis. Writes a `strfry:startup` hash heartbeat.
 - **[`src/WriterPipeline.h`](src/WriterPipeline.h)** + **[`src/apps/relay/RelayWriter.cpp`](src/apps/relay/RelayWriter.cpp)** — after a _newly written_ event commits, if its kind is in `REDIS_ALLOW_KINDS` (see [`redisAllowKinds.h`](src/redisAllowKinds.h)) it gets `RPUSH`ed (raw JSON) onto the Redis list **`strfry:events`**. Only `Written` status (not duplicate/replaced) is forwarded.
   - kinds: **0** profile metadata, **3** contacts/follows, **10000** mute list, **1984** reports — exactly the graph/profile inputs Brainstorm needs — plus **5** NIP-09 deletions.
@@ -51,6 +51,6 @@ Grounded in `git diff origin/master..neofry`. The point of neofry is to **push s
 ## Gotchas
 
 - **neofry hard-requires Redis at startup** — [`onAppStartup.cpp`](src/onAppStartup.cpp) throws if it can't connect. In compose/k8s, Redis must come up first (`depends_on: redis_strfry`).
-- **Only `REDIS_ALLOW_KINDS = {0,3,5,1984,10000}` are forwarded** to `strfry:events`. Defined once in [`redisAllowKinds.h`](src/redisAllowKinds.h).
+- **Which kinds are forwarded to `strfry:events` is config-driven** — `cfg().redis__kinds` (comma-separated, default `0,3,5,1984,10000`), set in `strfry.conf`'s `redis { kinds = "..." }` block. So forwarding a new kind is a config change + neofry **restart** — no image rebuild. A kind only helps if `brainstorm_server`'s `process_strfry_event` has a matching handler. Parsed once by `redisAllowKinds()`.
 - **Don't add mods to `master`** — all our changes live on `neofry`.
 - **Keep the delta rebase-friendly** — every mod is replayed onto each new upstream tag. Avoid touching upstream files more than necessary.
