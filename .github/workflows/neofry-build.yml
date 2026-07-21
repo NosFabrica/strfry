@@ -6,25 +6,19 @@ name: neofry-build
 # tag in Helm values.
 #
 # Differences vs. those repos, all intentional:
-#   * Builds linux/amd64 only — that's all the cluster runs.
 #   * `submodules: true` on checkout — strfry has git submodules.
 #   * Uses Dockerfile.neofry (the relay+plugin variant) rather than the
 #     plain Dockerfile.
-#   * Tag triggers are `neofry-*` instead of `v*`, since this repo
-#     namespaces its own version tags under that prefix to avoid colliding
-#     with upstream strfry's `vX.Y.Z` tags.
+#   * Release model is BRANCH-DRIVEN: pushing the `neofry` branch publishes
+#     `:latest` + `:latest-<strfry-ver>`, multi-arch. There is no version-tag
+#     trigger — deploys pin the immutable `:sha-<short>` tag in Helm values.
 on:
   workflow_dispatch:
   push:
+    # Every branch builds a test image (`:<branch>` + `:sha-<short>`, amd64).
+    # Release tags + arm64 are gated to the `neofry` branch below.
     branches:
-      # Build for every branch. Branch-derived tags are sanitized by
-      # docker/metadata-action (slashes become dashes), so feature branches
-      # like `fix/kind-0` produce a `fix-kind-0` image tag automatically.
-      # `:latest` is gated separately below to only fire on the `neofry`
-      # default branch — see the metadata-action `enable=` clause.
       - "**"
-    tags:
-      - "neofry-*"
 
 concurrency:
   group: neofry-build-${{ github.ref }}
@@ -63,17 +57,14 @@ jobs:
         run: |
           echo "name=$(echo '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      # Compute the legacy combined version tag (neofry-X.Y.Z-strfry-X.Y.Z)
-      # so we can keep publishing it alongside the new metadata-action tags.
-      # Anyone already pinning to that tag in values continues to work.
-      - name: Compute legacy combined version tag
-        id: legacy
+      # The upstream strfry base version (highest X.Y.Z git tag), for the
+      # `:latest-<ver>` release tag. The image repo is `.../neofry`, so this
+      # already reads as "neofry built on strfry <ver>".
+      - name: Compute strfry base version
+        id: ver
         run: |
           STRFRY_VER=$(git tag --sort=-v:refname | grep -P '^\d+\.\d+\.\d+$' | head -1)
-          STRFRY_VER="${STRFRY_VER:-unknown}"
-          NEOFRY_VER=$(git tag --sort=-v:refname | grep -oP '^neofry-\K.*' | head -1)
-          NEOFRY_VER="${NEOFRY_VER:-0.0.0}"
-          echo "tag=neofry-${NEOFRY_VER}-strfry-${STRFRY_VER}" >> "$GITHUB_OUTPUT"
+          echo "strfry=${STRFRY_VER:-unknown}" >> "$GITHUB_OUTPUT"
 
       - name: Docker metadata
         id: meta
@@ -82,22 +73,16 @@ jobs:
           images: |
             ${{ steps.img.outputs.name }}
           # Tag matrix:
-          #   * branch name on every branch push        (mutable)
-          #   * full git ref on tag pushes              (mutable per ref)
-          #   * `sha-<short>` on every push             (immutable per commit)  <- pin this in values
-          #   * semver from `v*` tags (we don't really publish these for
-          #     neofry today, but harmless to declare)  (immutable)
-          #   * combined `neofry-X.Y.Z-strfry-X.Y.Z`    (legacy alias, neofry branch only)
-          #   * `:latest` only on the default branch    (mutable)
-          # The version alias and `:latest` are release identifiers, so both are
-          # gated to the `neofry` branch — a feature branch must never clobber them.
+          #   * `:<branch>`             every branch push        (mutable, test image)
+          #   * `:sha-<short>`          every push               (immutable)  <- pin this in values
+          #   * `:latest-<strfry-ver>`  neofry branch only       (mutable, floating latest per base)
+          #   * `:latest`               neofry branch only       (mutable, the release)
+          # The two `:latest*` tags are release identifiers, gated to the `neofry`
+          # branch so a feature branch can never clobber them.
           tags: |
             type=ref,event=branch
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short,prefix=sha-
-            type=raw,value=${{ steps.legacy.outputs.tag }},enable=${{ github.ref == format('refs/heads/{0}', 'neofry') }}
+            type=raw,value=latest-${{ steps.ver.outputs.strfry }},enable=${{ github.ref == format('refs/heads/{0}', 'neofry') }}
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'neofry') }}
 
       - name: Set up QEMU
@@ -120,7 +105,8 @@ jobs:
           file: Dockerfile.neofry
           push: true
           provenance: false
-          platforms: ${{ (github.ref == format('refs/heads/{0}', 'neofry') || startsWith(github.ref, 'refs/tags/neofry-')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          # neofry branch (release) = both arches; every other branch = amd64 only (fast)
+          platforms: ${{ github.ref == format('refs/heads/{0}', 'neofry') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
