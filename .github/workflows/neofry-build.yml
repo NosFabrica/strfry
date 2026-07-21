@@ -87,15 +87,17 @@ jobs:
           #   * `sha-<short>` on every push             (immutable per commit)  <- pin this in values
           #   * semver from `v*` tags (we don't really publish these for
           #     neofry today, but harmless to declare)  (immutable)
-          #   * combined `neofry-X.Y.Z-strfry-X.Y.Z`    (legacy alias, mutable)
+          #   * combined `neofry-X.Y.Z-strfry-X.Y.Z`    (legacy alias, neofry branch only)
           #   * `:latest` only on the default branch    (mutable)
+          # The version alias and `:latest` are release identifiers, so both are
+          # gated to the `neofry` branch — a feature branch must never clobber them.
           tags: |
             type=ref,event=branch
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short,prefix=sha-
-            type=raw,value=${{ steps.legacy.outputs.tag }}
+            type=raw,value=${{ steps.legacy.outputs.tag }},enable=${{ github.ref == format('refs/heads/{0}', 'neofry') }}
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'neofry') }}
 
       - name: Set up QEMU
