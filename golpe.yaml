@@ -139,6 +139,11 @@ config:
     default: 6379
     noReload: true
 
+  - name: redis__kinds
+    desc: "Comma-separated event kinds forwarded to the strfry:events redis list."
+    default: "0,3,5,1984,10000"
+    noReload: true
+
   - name: events__maxEventSize
     desc: "Maximum size of normalised JSON, in bytes"
     default: 300000000000000
