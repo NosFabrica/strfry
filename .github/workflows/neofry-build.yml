@@ -1,9 +1,7 @@
 name: neofry-build
 
 # Mirrors the build workflow used by the in-house brainstorm repos
-# (brainstorm_server, Brainstorm-UI, brainstorm_graperank_algorithm) so
-# that operators can pin a specific commit via the standard `sha-<short>`
-# tag in Helm values.
+# (brainstorm_server, Brainstorm-UI, brainstorm_graperank_algorithm).
 #
 # Differences vs. those repos, all intentional:
 #   * `submodules: true` on checkout — strfry has git submodules.
@@ -11,12 +9,15 @@ name: neofry-build
 #     plain Dockerfile.
 #   * Release model is BRANCH-DRIVEN: pushing the `neofry` branch publishes
 #     `:latest` + `:latest-<strfry-ver>`, multi-arch. There is no version-tag
-#     trigger — deploys pin the immutable `:sha-<short>` tag in Helm values.
+#     trigger.
+#   * Each arch is built on its own native runner and pushed by digest, then a
+#     `merge` job assembles the manifest list — so no tag exists until both
+#     arches are up. arm64 under QEMU took 41-47min per release vs ~5min native.
 on:
   workflow_dispatch:
   push:
-    # Every branch builds a test image (`:<branch>` + `:sha-<short>`, amd64).
-    # Release tags + arm64 are gated to the `neofry` branch below.
+    # Every branch builds both arches (`:<branch>` + `:sha-<short>`).
+    # The `:latest*` release tags are gated to the `neofry` branch below.
     branches:
       - "**"
 
@@ -26,21 +27,27 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  # Override the default `<org>/<repo>` -> `nosfabrica/strfry` mapping;
-  # the published image has historically been called `neofry` and the
-  # Helm chart's neofry.image.repository default points there.
-  IMAGE_NAME: ${{ github.repository_owner }}/neofry
+  IMAGE: ghcr.io/nosfabrica/neofry
 
 jobs:
   build:
-    name: Build and push image
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -52,10 +59,75 @@ jobs:
           ignore: DL3008,DL3018,DL3059
           failure-threshold: warning
 
-      - name: Compute lowercase image name
-        id: img
+      # Labels only — tagging happens once, in the merge job.
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pushed by digest, untagged: nothing is referenceable in the registry
+      # until the merge job tags the manifest list.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.neofry
+          platforms: ${{ matrix.platform }}
+          provenance: false
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          # Per-arch scope; a shared one has the two jobs evicting each other.
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      # Artifacts are the only cross-job channel, so the digest travels as a
+      # filename.
+      - name: Export digest
         run: |
-          echo "name=$(echo '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v6
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Merge manifests and tag
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # fetch-depth: 0 — the strfry base version below reads git tags.
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Download digests
+        uses: actions/download-artifact@v7
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
 
       # The upstream strfry base version (highest X.Y.Z git tag), for the
       # `:latest-<ver>` release tag. The image repo is `.../neofry`, so this
@@ -68,13 +140,16 @@ jobs:
 
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
+        env:
+          # Manifest-list annotations, for `imagetools create --annotation`.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: |
-            ${{ steps.img.outputs.name }}
+            ${{ env.IMAGE }}
           # Tag matrix:
           #   * `:<branch>`             every branch push        (mutable, test image)
-          #   * `:sha-<short>`          every push               (immutable)  <- pin this in values
+          #   * `:sha-<short>`          every push               (immutable)
           #   * `:latest-<strfry-ver>`  neofry branch only       (mutable, floating latest per base)
           #   * `:latest`               neofry branch only       (mutable, the release)
           # The two `:latest*` tags are release identifiers, gated to the `neofry`
@@ -85,30 +160,27 @@ jobs:
             type=raw,value=latest-${{ steps.ver.outputs.strfry }},enable=${{ github.ref == format('refs/heads/{0}', 'neofry') }}
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'neofry') }}
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.neofry
-          push: true
-          provenance: false
-          # neofry branch (release) = both arches; every other branch = amd64 only (fast)
-          platforms: ${{ github.ref == format('refs/heads/{0}', 'neofry') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          annotations: ${{ steps.meta.outputs.annotations }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          args=()
+          while IFS= read -r tag; do args+=(-t "$tag"); done \
+            < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          while IFS= read -r ann; do args+=(--annotation "$ann"); done \
+            < <(jq -r '.annotations[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          for digest in *; do args+=("$IMAGE@sha256:$digest"); done
+          docker buildx imagetools create "${args[@]}"
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
