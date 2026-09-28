@@ -6,6 +6,8 @@ It does two jobs in the Brainstorm workspace:
 1. ships the **unmodified upstream strfry** image (a plain relay), and
 2. ships **`neofry`** — upstream strfry **plus our mods**, the one that feeds events into Brainstorm.
 
+Part of the Brainstorm/Tapestry estate — the map of the estate's repos and deployments (including the relay hosts this fork serves) is [ECOSYSTEM.md](https://github.com/NosFabrica/protocols/blob/main/ECOSYSTEM.md) in `NosFabrica/protocols`.
+
 > Upstream strfry's own features (relay, `strfry router`, `strfry stream`, negentropy sync, write policies, LMDB) are documented in [`README.md`](README.md) (largely the upstream readme). **This file only documents what is OURS.** Don't re-document upstream here.
 
 ## Branches
